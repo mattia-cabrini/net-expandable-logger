@@ -1,0 +1,24 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# df collector -- filesystem usage, shown in the e-mail BODY only (no attachment).
+TAG=df
+
+# Real filesystems only: drop the virtual ones (devfs, tmpfs, ...). If that
+# leaves nothing (unusual), fall back to the full df output.
+out=$(df -h 2>/dev/null | grep -v -e devfs -e tmpfs -e fdescfs -e procfs 2>/dev/null)
+[ -n "$out" ] || out=$(df -h 2>/dev/null)
+
+# Body fragment: a heading and the table, HTML-escaped inside <pre>.
+{
+	printf '<h4>Filesystem usage</h4>\n'
+	printf '<pre>\n'
+	printf '%s\n' "$out" | esc
+	printf '</pre>\n'
+} > "log.$TAG.html"
+
+# No attachment for this collector.
+: > "attachment.$TAG.html"
+
+seal

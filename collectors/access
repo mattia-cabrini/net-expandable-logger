@@ -1,0 +1,31 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# access collector -- SSH logins and failures of the last ~48h, as an
+# attachment, with a one-line summary (accepted vs failed) in the body.
+TAG=access
+
+SRC=${AUTH_FILE:-/var/log/auth.log}
+[ -r "$SRC" ] || exit 0   # no auth log -> skipped
+
+# Last 48h of the auth log, keeping only sshd lines.
+ere=$(since_ere 2)
+tmp=$(mktemp) || exit 0
+grep -E "^$ere" "$SRC" 2>/dev/null | grep 'sshd' > "$tmp"
+
+# Count successful logins and the various flavours of failure.
+acc=$(grep -c 'Accepted ' "$tmp" 2>/dev/null) || acc=0
+fail=$(grep -Ec 'Failed password|Invalid user|authentication failure' "$tmp" 2>/dev/null) || fail=0
+
+# Body fragment: the summary; the full sshd events are the attachment.
+{
+	printf '<h4>SSH access</h4>\n'
+	printf '<p>Last 48h: %s accepted logins, %s failed attempts.</p>\n' "$acc" "$fail"
+} > "log.$TAG.html"
+
+attach "auth.txt" < "$tmp"
+printf '<li>auth.txt &mdash; sshd auth events, last 48h</li>\n' > "attachment.$TAG.html"
+
+rm -f "$tmp"
+seal

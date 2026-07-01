@@ -1,0 +1,60 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# fw_log collector -- firewall EVENTS of the last ~48h, as an attachment, with a
+# count in the body. Where the events come from depends on FIREWALL:
+#   pf    -> /var/log/pflog, a binary pcap file, decoded with tcpdump
+#   ipfw  -> /var/log/security, a text log, filtered for ipfw lines
+#   other -> the system log, filtered by FW_SYSLOG_RE
+TAG=fwlog
+: "${FIREWALL:=pf}"
+: "${PFLOG_FILE:=/var/log/pflog}"
+: "${IPFW_LOG_FILE:=/var/log/security}"
+: "${MESSAGES_FILE:=/var/log/messages}"
+: "${FW_SYSLOG_RE:=ipfw|pf: }"
+
+tmp=$(mktemp) || exit 0
+
+# Collect the events into $tmp according to the configured firewall.
+case "$FIREWALL" in
+pf)
+	# pflog is a pcap; tcpdump prints it as text with full timestamps (-tttt).
+	if have tcpdump && [ -r "$PFLOG_FILE" ]; then
+		tcpdump -n -e -tttt -r "$PFLOG_FILE" > "$tmp" 2>/dev/null
+	fi
+	;;
+ipfw)
+	# Text log: keep the last 48h, then the ipfw lines.
+	if [ -r "$IPFW_LOG_FILE" ]; then
+		ere=$(since_ere 2)
+		grep -E "^$ere" "$IPFW_LOG_FILE" 2>/dev/null | grep -i ipfw > "$tmp"
+	fi
+	;;
+*)
+	# Fallback: pull firewall lines out of the system log.
+	if [ -r "$MESSAGES_FILE" ]; then
+		ere=$(since_ere 2)
+		grep -E "^$ere" "$MESSAGES_FILE" 2>/dev/null | grep -E "$FW_SYSLOG_RE" > "$tmp"
+	fi
+	;;
+esac
+
+count=$(wc -l < "$tmp" | tr -d ' ')
+
+# Body fragment: the count; the events themselves go in the attachment.
+{
+	printf '<h4>Firewall events (%s)</h4>\n' "$FIREWALL"
+	printf '<p>Last 48h: %s logged firewall events.</p>\n' "$count"
+} > "log.$TAG.html"
+
+# Attach the events only if we actually collected some.
+if [ -s "$tmp" ]; then
+	attach "fw_log.txt" < "$tmp"
+	printf '<li>fw_log.txt &mdash; firewall events, last 48h</li>\n' > "attachment.$TAG.html"
+else
+	: > "attachment.$TAG.html"
+fi
+
+rm -f "$tmp"
+seal

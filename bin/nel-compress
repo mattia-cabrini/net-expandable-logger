@@ -1,0 +1,30 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# nel-compress -- Phase 2 of the daily run, executed in $WORK between the
+# collectors and nel-assemble. It gzips every attachment that is larger than
+# GZIP_THRESHOLD bytes, renaming "<file>.dat" to "<file>.dat.gz". Small
+# attachments are left untouched.
+
+set -u
+
+NEL_CONF=${NEL_CONF:-/usr/local/etc/nel.conf}
+. "$NEL_CONF"
+: "${GZIP_THRESHOLD:=10240}"
+
+# Walk the sealed collectors (one ".sem" each) and look at their attachments.
+for sem in ./*.sem; do
+	[ -f "$sem" ] || continue
+	tag=$(basename "$sem" .sem)
+
+	for f in attachment."$tag".*.dat; do
+		[ -f "$f" ] || continue
+
+		size=$(wc -c < "$f")
+		if [ "$size" -gt "$GZIP_THRESHOLD" ]; then
+			# -9 = best compression, -n = don't store name/timestamp (stable output).
+			gzip -9 -n "$f"
+		fi
+	done
+done

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# syslog_no_fw collector -- the same last-48h system log as the syslog
+# collector, but with firewall lines removed, as an attachment. Which lines
+# count as "firewall" is FW_SYSLOG_RE (an ERE), set at configure time to match
+# the firewall in use (pf, ipfw, ...).
+TAG=syslognofw
+
+SRC=${MESSAGES_FILE:-/var/log/messages}
+[ -r "$SRC" ] || exit 0   # no log to read -> skipped
+: "${FW_SYSLOG_RE:=\\[UFW |ipfw|pf: }"
+
+# Keep the last 48h (grep -E "^$ere"), then drop firewall lines (grep -Ev).
+ere=$(since_ere 2)
+tmp=$(mktemp) || exit 0
+grep -E "^$ere" "$SRC" 2>/dev/null | grep -Ev "$FW_SYSLOG_RE" > "$tmp"
+
+lines=$(wc -l < "$tmp" | tr -d ' ')
+
+# Body fragment: summary only; the filtered log is the attachment.
+{
+	printf '<h4>syslog (no firewall)</h4>\n'
+	printf '<p>System log, last 48h, firewall lines removed: %s lines.</p>\n' "$lines"
+} > "log.$TAG.html"
+
+attach "syslog_no_fw.txt" < "$tmp"
+printf '<li>syslog_no_fw.txt &mdash; system log, last 48h, firewall lines removed</li>\n' > "attachment.$TAG.html"
+
+rm -f "$tmp"
+seal

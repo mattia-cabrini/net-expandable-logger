@@ -1,0 +1,50 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# fw_status collector -- the firewall's current state, shown in the e-mail BODY
+# only (no attachment). It reports the clearest view each tool offers:
+#   pf    -> info/defaults, NAT rules, and the numbered ruleset
+#   ipfw  -> the numbered ruleset (with counters) and NAT config
+#   other -> a note that no supported firewall is configured
+TAG=fwstatus
+: "${FIREWALL:=pf}"
+
+# section TITLE TEXT -- print a labelled block of command output, HTML-escaped.
+section() {
+	printf '<p>%s</p>\n<pre>\n' "$1"
+	printf '%s\n' "$2" | esc
+	printf '</pre>\n'
+}
+
+{
+	printf '<h4>Firewall status (%s)</h4>\n' "$FIREWALL"
+
+	case "$FIREWALL" in
+	pf)
+		if have pfctl; then
+			section "Info / defaults:"  "$(pfctl -s info 2>/dev/null)"
+			section "NAT rules:"        "$(pfctl -s nat 2>/dev/null)"
+			section "Numbered ruleset:" "$(pfctl -vvsr 2>/dev/null)"
+		else
+			printf '<p>pfctl not available.</p>\n'
+		fi
+		;;
+	ipfw)
+		if have ipfw; then
+			section "Numbered ruleset (with counters):" "$(ipfw show 2>/dev/null)"
+			section "NAT configuration:"                "$(ipfw nat show config 2>/dev/null)"
+		else
+			printf '<p>ipfw not available.</p>\n'
+		fi
+		;;
+	*)
+		printf '<p>No supported firewall configured (FIREWALL=%s).</p>\n' "$FIREWALL"
+		;;
+	esac
+} > "log.$TAG.html"
+
+# No attachment for this collector.
+: > "attachment.$TAG.html"
+
+seal

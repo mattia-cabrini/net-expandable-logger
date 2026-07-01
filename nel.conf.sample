@@ -1,0 +1,37 @@
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# nel.conf -- net-expandable-logger configuration. Written by `make install`;
+# edit by hand afterwards if needed. Sourced by every framework script.
+
+# --- identity ---------------------------------------------------------------
+HOSTLABEL="CHANGEME"                     # short host label used in subject/body
+RECIPIENT="CHANGEME@example.org"         # To: header of the assembled .noeml
+SUBJECT="$HOSTLABEL [INFO] - STATUS"
+
+# --- framework paths (set by the installer, normally left as is) ------------
+BASE="/usr/local/libexec/nel"
+LIBDIR="$BASE"
+SVCDIR="$BASE/collectors"
+NEL_LIB="$BASE/lib.sh"
+
+# --- work and output --------------------------------------------------------
+WORK="/var/spool/nel/work"               # collectors write fragments here
+DEPOSIT="/var/spool/nel/deposit"         # finished .noeml are dropped here
+GZIP_THRESHOLD=10240                      # gzip attachments above this many bytes
+
+# --- optional signing (leave empty to skip) ---------------------------------
+SIGN_KEY=""
+SIGN_PASSFILE=""
+
+# --- log sources ------------------------------------------------------------
+MESSAGES_FILE="/var/log/messages"        # FreeBSD system log
+AUTH_FILE="/var/log/auth.log"            # sshd auth events
+
+# --- firewall (pf | ipfw | none) --------------------------------------------
+FIREWALL="pf"
+PFLOG_FILE="/var/log/pflog"              # pf: binary pcap, read with tcpdump
+IPFW_LOG_FILE="/var/log/security"        # ipfw: text log
+# ERE matching firewall lines to strip from syslog_no_fw and, as a fallback,
+# to pick firewall events out of the system log.
+FW_SYSLOG_RE="ipfw|pf: "

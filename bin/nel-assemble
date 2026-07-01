@@ -1,0 +1,186 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# nel-assemble -- Phase 3 of the daily run. Runs in $WORK after the collectors
+# and nel-compress. It gathers the fragments every sealed collector left behind,
+# builds one HTML e-mail body, hands the body and the attachments to cmc-eml to
+# produce a .noeml message, and drops that message into $DEPOSIT.
+#
+# The drop is atomic: the message is written to a "<name>.part" temporary and
+# only renamed to its final name once complete, so a delivery agent watching
+# $DEPOSIT never sees a half-written file.
+#
+# If SIGN_KEY is set the message is PGP-signed (detached signature) before it is
+# assembled; otherwise it is sent in the clear.
+
+set -u
+
+# --- configuration ----------------------------------------------------------
+NEL_CONF=${NEL_CONF:-/usr/local/etc/nel.conf}
+. "$NEL_CONF"
+: "${RECIPIENT:?}"; : "${DEPOSIT:?}"
+: "${HOSTLABEL:=$(hostname -s 2>/dev/null || hostname)}"
+: "${SUBJECT:=$HOSTLABEL [INFO] - STATUS}"
+
+# --- tools ------------------------------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
+have cmc-eml || { echo "nel-assemble: cmc-eml not found in PATH" >&2; exit 1; }
+CMC=$(command -v cmc-eml)
+GPG=$(command -v gpg 2>/dev/null || echo gpg)
+
+# mime_for FILENAME -- guess a MIME type from the filename extension.
+mime_for() {
+	case "$1" in
+	*.gz)         echo application/gzip ;;
+	*.txt|*.log)  echo text/plain ;;
+	*.csv)        echo text/csv ;;
+	*.html|*.htm) echo text/html ;;
+	*.json)       echo application/json ;;
+	*.xml)        echo application/xml ;;
+	*)            echo application/octet-stream ;;
+	esac
+}
+
+# sha256_of FILE -- hex SHA-256 digest, using whichever tool the OS provides
+# (FreeBSD ships "sha256", Linux ships "sha256sum").
+sha256_of() {
+	if have sha256; then
+		sha256 -q "$1"
+	elif have sha256sum; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		echo "unavailable"
+	fi
+}
+
+# payload_name FRAGMENT -- turn an attachment fragment filename into the real
+# attachment name that the recipient should see.
+#
+# Fragments are named   attachment.<TAG>.<NAME>.dat        (or .dat.gz)
+# where <NAME> already carries its own extension, e.g. "syslog.txt". So for the
+# fragment "attachment.syslog.syslog.txt.dat.gz" we want to end up with
+# "syslog.txt.gz". We peel the name apart one layer at a time:
+payload_name() {
+	_frag=$1
+
+	# Was it gzipped by nel-compress? Remember the ".gz" to re-add at the end.
+	case "$_frag" in
+	*.dat.gz) _gz=".gz"; _frag=${_frag%.dat.gz} ;;   # drop the ".dat.gz" wrapper
+	*.dat)    _gz="";    _frag=${_frag%.dat} ;;      # drop the ".dat" wrapper
+	esac
+
+	_frag=${_frag#attachment.}   # drop the leading "attachment." -> "<TAG>.<NAME>"
+	_name=${_frag#*.}            # drop the "<TAG>." prefix        -> "<NAME>"
+
+	printf '%s%s' "$_name" "$_gz"
+}
+
+# --- scratch files ----------------------------------------------------------
+body=$(mktemp) || exit 1
+cmds=$(mktemp) || { rm -f "$body"; exit 1; }
+trap 'rm -f "$body" "$cmds"' EXIT INT TERM
+
+# --- build the HTML body ----------------------------------------------------
+# Header, then each sealed collector's body fragment, then the list of
+# attachments those collectors declared. A ".sem" file marks a sealed collector.
+{
+	printf '<h3>%s &mdash; status</h3>\n' "$HOSTLABEL"
+	printf '<p>Generated %s</p>\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+	for sem in ./*.sem; do
+		[ -f "$sem" ] || continue
+		tag=$(basename "$sem" .sem)
+		[ -f "log.$tag.html" ] && cat "log.$tag.html"
+	done
+
+	printf '<h4>Attachments</h4>\n'
+	for sem in ./*.sem; do
+		[ -f "$sem" ] || continue
+		tag=$(basename "$sem" .sem)
+		[ -f "attachment.$tag.html" ] && cat "attachment.$tag.html"
+	done
+} > "$body"
+
+# --- register the attachments -----------------------------------------------
+# For every attachment payload: append a row to the SHA-256 table in the body,
+# and append an "add-attachment" command for cmc-eml to the command list.
+printf '<h4>Attachment hashes (SHA-256)</h4>\n<table>\n' >> "$body"
+printf '<tr><th>file</th><th>bytes</th><th>sha256</th></tr>\n' >> "$body"
+
+for frag in attachment.*.dat attachment.*.dat.gz; do
+	[ -f "$frag" ] || continue
+
+	name=$(payload_name "$frag")
+	mime=$(mime_for "$name")
+	sum=$(sha256_of "$frag")
+	size=$(wc -c < "$frag")
+
+	printf '<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n' "$name" "$size" "$sum" >> "$body"
+	printf 'do=add-attachment mime-type="%s" filename="%s" fmt=1 path="%s"\n' \
+		"$mime" "$name" "$PWD/$frag" >> "$cmds"
+done
+printf '</table>\n' >> "$body"
+
+# --- pick the output path ---------------------------------------------------
+# A timestamp plus a few random bytes keep names unique across runs.
+stamp=$(date +%Y%m%d%H%M%S)
+rand=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+out="$DEPOSIT/$HOSTLABEL.$stamp.$rand.noeml"
+tmp="$out.part"
+
+# --- assemble the message ---------------------------------------------------
+if [ -n "${SIGN_KEY:-}" ]; then
+	# Signed path, three steps:
+	#   1. cmc-eml renders the clear (unsigned) message to $clear.
+	#   2. gpg makes a detached, armored signature of $clear.
+	#   3. cmc-eml wraps clear message + signature into the final .noeml.
+	clear=$(mktemp); asc=$(mktemp)
+	trap 'rm -f "$body" "$cmds" "$clear" "$asc"' EXIT INT TERM
+
+	# Step 1: render the clear message.
+	{
+		printf 'do=set-body mime-type="text/html" fmt=1 path="%s"\n' "$body"
+		cat "$cmds"
+		printf 'do=print-clear-eml path="%s"\n' "$clear"
+		printf 'do=quit\n'
+	} | "$CMC" || { echo "nel-assemble: cmc-eml pass1 failed" >&2; exit 1; }
+
+	# Step 2: sign it. Use the passphrase file if one was configured.
+	if [ -n "${SIGN_PASSFILE:-}" ]; then
+		"$GPG" --pinentry-mode loopback --passphrase-fd 0 --digest-algo SHA256 \
+		    --detach-sign -o "$asc" --yes --armor -u "$SIGN_KEY" "$clear" < "$SIGN_PASSFILE" \
+		    || { echo "nel-assemble: gpg sign failed" >&2; exit 1; }
+	else
+		"$GPG" --digest-algo SHA256 --detach-sign -o "$asc" --yes --armor \
+		    -u "$SIGN_KEY" "$clear" || { echo "nel-assemble: gpg sign failed" >&2; exit 1; }
+	fi
+
+	# The signature must use CRLF line endings inside the MIME message. Add a
+	# carriage return to every line. BSD sed needs "-i ''"; GNU sed needs "-i".
+	CR=$(printf '\r')
+	sed -i '' "s/\$/$CR/" "$asc" 2>/dev/null || sed -i "s/\$/$CR/" "$asc"
+
+	# Step 3: assemble the signed message.
+	{
+		printf 'do=add-header key=To value="%s"\n' "$RECIPIENT"
+		printf 'do=add-header key=Subject value="%s"\n' "$SUBJECT"
+		printf 'do=print-signed-eml clear-message="%s" signature="%s" path="%s"\n' \
+			"$clear" "$asc" "$tmp"
+		printf 'do=quit\n'
+	} | "$CMC" || { echo "nel-assemble: cmc-eml pass2 failed" >&2; rm -f "$tmp"; exit 1; }
+else
+	# Unsigned path: cmc-eml builds the whole .noeml in one pass.
+	{
+		printf 'do=set-body mime-type="text/html" fmt=1 path="%s"\n' "$body"
+		cat "$cmds"
+		printf 'do=add-header key=To value="%s"\n' "$RECIPIENT"
+		printf 'do=add-header key=Subject value="%s"\n' "$SUBJECT"
+		printf 'do=print-clear-eml path="%s"\n' "$tmp"
+		printf 'do=quit\n'
+	} | "$CMC" || { echo "nel-assemble: cmc-eml failed" >&2; rm -f "$tmp"; exit 1; }
+fi
+
+# --- publish atomically and clean up ----------------------------------------
+mv "$tmp" "$out"
+rm -f ./*.sem log.*.html attachment.*.html attachment.*.dat attachment.*.dat.gz

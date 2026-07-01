@@ -1,0 +1,60 @@
+#!/bin/sh
+# Copyright (c) 2026 Mattia Cabrini
+# SPDX-License-Identifier: MIT
+#
+# nel-run -- the orchestrator, run once a day from cron. It drives the three
+# phases of a run inside $WORK:
+#   1. run every collector in $SVCDIR (this script);
+#   2. compress oversized attachments        (nel-compress);
+#   3. assemble and deposit one .noeml        (nel-assemble).
+#
+# A directory-based lock makes sure two runs never overlap.
+
+set -u
+
+# --- configuration ----------------------------------------------------------
+NEL_CONF=${NEL_CONF:-/usr/local/etc/nel.conf}
+. "$NEL_CONF"
+: "${WORK:?}"; : "${SVCDIR:?}"; : "${NEL_LIB:?}"; : "${BASE:?}"; : "${DEPOSIT:?}"
+export NEL_CONF
+
+# Shared helper functions (esc, have, attach, seal, ...) for the collectors.
+. "$NEL_LIB"
+
+# --- lock: only one run at a time -------------------------------------------
+# "mkdir" is atomic, so it doubles as a lock: if the directory already exists
+# another run holds it, and we bail out. The trap releases it on any exit.
+LOCK=${LOCK:-/var/spool/nel/.lock}
+if ! mkdir "$LOCK" 2>/dev/null; then
+	logger -t nel "another run in progress; abort"
+	exit 0
+fi
+trap 'rm -rf "$LOCK"' EXIT INT TERM
+
+# --- prepare the work directory ---------------------------------------------
+mkdir -p "$WORK" "$DEPOSIT" || { logger -t nel "cannot create WORK/DEPOSIT"; exit 1; }
+cd "$WORK" || { logger -t nel "cannot enter WORK"; exit 1; }
+
+# Clear any fragments left over from an interrupted previous run.
+rm -f ./*.sem log.*.html attachment.*.html attachment.*.dat attachment.*.dat.gz
+
+# --- phase 1: run the collectors --------------------------------------------
+# Each collector is SOURCED in a subshell, so it runs in $WORK and can use the
+# helpers, while a crash or "exit" inside it cannot take this script down.
+for svc in "$SVCDIR"/*; do
+	[ -f "$svc" ] || continue
+	( . "$svc" ) || logger -t nel "collector failed: $(basename "$svc")"
+done
+
+# A collector reports something only if it planted its ".sem" semaphore. If no
+# collector sealed, there is nothing to send, so stop here.
+sealed=0
+for s in ./*.sem; do
+	[ -f "$s" ] && { sealed=1; break; }
+done
+[ "$sealed" = 1 ] || { logger -t nel "nothing to report"; exit 0; }
+
+# --- phases 2 and 3: compress, then assemble and deposit --------------------
+sh "$BASE/nel-compress"
+sh "$BASE/nel-assemble" || { logger -t nel "assemble failed"; exit 1; }
+logger -t nel "status assembled into DEPOSIT"
