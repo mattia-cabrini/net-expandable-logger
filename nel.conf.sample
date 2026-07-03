@@ -18,6 +18,7 @@ NEL_LIB="$BASE/lib.sh"
 # --- work and output --------------------------------------------------------
 WORK="/var/spool/nel/work"               # collectors write fragments here
 DEPOSIT="/var/spool/nel/deposit"         # finished .noeml are dropped here
+DEPOSIT_GROUP="external-log"             # chgrp the .noeml to this group; skipped (with a warning) if empty or absent
 GZIP_THRESHOLD=10240                      # gzip attachments above this many bytes
 
 # --- optional signing (leave empty to skip) ---------------------------------

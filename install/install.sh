@@ -48,6 +48,39 @@ detect_fw() {
 	fi
 }
 
+# group_exists NAME -- true if NAME is a group on this host. Prefers getent, so
+# it honours nsswitch (files, NIS, LDAP...); falls back to pw, then /etc/group.
+group_exists() {
+	if command -v getent >/dev/null 2>&1; then
+		getent group "$1" >/dev/null 2>&1
+	elif command -v pw >/dev/null 2>&1; then
+		pw groupshow "$1" >/dev/null 2>&1
+	else
+		cut -d: -f1 /etc/group | grep -Fxq -- "$1"
+	fi
+}
+
+# ask_group PROMPT DEFAULT -- like ask, but keeps prompting until the reply
+# names a group that exists, and leaves the result in $group. It sets a global
+# (rather than echoing like ask) so it can abort the whole install: an "exit"
+# inside a $(...) would only leave the substitution's subshell. If there is no
+# terminal to read from it aborts instead of looping forever on the default.
+ask_group() {
+	prompt=$1
+	default=$2
+	while :; do
+		printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
+		IFS= read -r group < /dev/tty || {
+			echo "install.sh: no terminal to read the deposit group" >&2
+			exit 1
+		}
+		[ -n "$group" ] || group=$default
+		group_exists "$group" && return 0
+		printf 'Group "%s" does not exist; enter an existing group.\n' \
+			"$group" > /dev/tty
+	done
+}
+
 echo "=== net-expandable-logger installer ==="
 
 # --- decide whether to (re)write the configuration --------------------------
@@ -70,6 +103,8 @@ if [ "$DO_CONF" = 1 ]; then
 	HOSTLABEL=$(ask "Host label"                 "$def_host")
 	RECIPIENT=$(ask "Recipient e-mail (To:)"     "log@example.org")
 	DEPOSIT=$(ask   "Deposit directory (.noeml)" "/var/spool/nel/deposit")
+	ask_group       "Deposit file group"        "external-log"
+	DEPOSIT_GROUP=$group
 	WORK=$(ask      "Work directory (fragments)" "/var/spool/nel/work")
 	MESSAGES_FILE=$(ask "System log file"        "/var/log/messages")
 	AUTH_FILE=$(ask "SSH auth log file"          "/var/log/auth.log")
@@ -110,6 +145,7 @@ NEL_LIB="$LIBEXEC/lib.sh"
 
 WORK="$WORK"
 DEPOSIT="$DEPOSIT"
+DEPOSIT_GROUP="$DEPOSIT_GROUP"
 GZIP_THRESHOLD=10240
 
 SIGN_KEY="$SIGN_KEY"

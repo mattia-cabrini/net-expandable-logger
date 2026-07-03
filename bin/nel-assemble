@@ -182,5 +182,12 @@ else
 fi
 
 # --- publish atomically and clean up ----------------------------------------
+# If a deposit group was configured, set it on the temporary *before* the
+# rename, so the file lands at its final name already owned by the right group.
+# A failed chgrp is not fatal: the status message still gets delivered.
+if [ -n "${DEPOSIT_GROUP:-}" ]; then
+	chgrp "$DEPOSIT_GROUP" "$tmp" \
+	    || echo "nel-assemble: chgrp $DEPOSIT_GROUP failed" >&2
+fi
 mv "$tmp" "$out"
 rm -f ./*.sem log.*.html attachment.*.html attachment.*.dat attachment.*.dat.gz

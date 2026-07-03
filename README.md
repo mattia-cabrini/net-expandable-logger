@@ -24,6 +24,7 @@ sudo make install # interactive: asks recipient, deposit dir, firewall, cron tim
 - Host label;
 - Recipient;
 - Deposit and work directories;
+- Deposit file group (the installer checks it exists);
 - Log sources;
 - Firewall (auto-detected);
 - Optional PGP signing key; and
