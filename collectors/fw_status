@@ -6,6 +6,7 @@
 # only (no attachment). It reports the clearest view each tool offers:
 #   pf    -> info/defaults, NAT rules, and the numbered ruleset
 #   ipfw  -> the numbered ruleset (with counters) and NAT config
+#   ufw   -> the verbose status and the numbered rules
 #   other -> a note that no supported firewall is configured
 TAG=fwstatus
 : "${FIREWALL:=pf}"
@@ -36,6 +37,15 @@ section() {
 			section "NAT configuration:"                "$(ipfw nat show config 2>/dev/null)"
 		else
 			printf '<p>ipfw not available.</p>\n'
+		fi
+		;;
+	ufw)
+		# ufw status/numbered need root; nel-run runs from cron as root.
+		if have ufw; then
+			section "Status (verbose):" "$(ufw status verbose 2>/dev/null)"
+			section "Numbered rules:"   "$(ufw status numbered 2>/dev/null)"
+		else
+			printf '<p>ufw not available.</p>\n'
 		fi
 		;;
 	*)

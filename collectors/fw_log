@@ -6,11 +6,13 @@
 # count in the body. Where the events come from depends on FIREWALL:
 #   pf    -> /var/log/pflog, a binary pcap file, decoded with tcpdump
 #   ipfw  -> /var/log/security, a text log, filtered for ipfw lines
+#   ufw   -> /var/log/ufw.log, a text log, filtered for "[UFW ...]" lines
 #   other -> the system log, filtered by FW_SYSLOG_RE
 TAG=fwlog
 : "${FIREWALL:=pf}"
 : "${PFLOG_FILE:=/var/log/pflog}"
 : "${IPFW_LOG_FILE:=/var/log/security}"
+: "${UFW_LOG_FILE:=/var/log/ufw.log}"
 : "${MESSAGES_FILE:=/var/log/messages}"
 : "${FW_SYSLOG_RE:=ipfw|pf: }"
 
@@ -29,6 +31,13 @@ ipfw)
 	if [ -r "$IPFW_LOG_FILE" ]; then
 		ere=$(since_ere 2)
 		grep -E "^$ere" "$IPFW_LOG_FILE" 2>/dev/null | grep -i ipfw > "$tmp"
+	fi
+	;;
+ufw)
+	# Text log: keep the last 48h, then the "[UFW ...]" lines.
+	if [ -r "$UFW_LOG_FILE" ]; then
+		ere=$(since_ere 2)
+		grep -E "^$ere" "$UFW_LOG_FILE" 2>/dev/null | grep -F '[UFW ' > "$tmp"
 	fi
 	;;
 *)

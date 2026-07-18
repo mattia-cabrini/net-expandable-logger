@@ -43,6 +43,8 @@ detect_fw() {
 		echo pf
 	elif ipfw list >/dev/null 2>&1; then
 		echo ipfw
+	elif ufw status >/dev/null 2>&1; then
+		echo ufw
 	else
 		echo none
 	fi
@@ -99,6 +101,10 @@ fi
 if [ "$DO_CONF" = 1 ]; then
 	def_host=$(hostname -s 2>/dev/null || hostname)
 	def_fw=$(detect_fw)
+	# Default system log: /var/log/messages on FreeBSD, /var/log/syslog on
+	# Ubuntu. Offer whichever actually exists here.
+	def_msgs=/var/log/messages
+	[ -r "$def_msgs" ] || { [ -r /var/log/syslog ] && def_msgs=/var/log/syslog; }
 
 	HOSTLABEL=$(ask "Host label"                 "$def_host")
 	RECIPIENT=$(ask "Recipient e-mail (To:)"     "log@example.org")
@@ -106,9 +112,9 @@ if [ "$DO_CONF" = 1 ]; then
 	ask_group       "Deposit file group"        "external-log"
 	DEPOSIT_GROUP=$group
 	WORK=$(ask      "Work directory (fragments)" "/var/spool/nel/work")
-	MESSAGES_FILE=$(ask "System log file"        "/var/log/messages")
+	MESSAGES_FILE=$(ask "System log file"        "$def_msgs")
 	AUTH_FILE=$(ask "SSH auth log file"          "/var/log/auth.log")
-	FIREWALL=$(ask  "Firewall (pf|ipfw|none)"    "$def_fw")
+	FIREWALL=$(ask  "Firewall (pf|ipfw|ufw|none)" "$def_fw")
 	SIGN_KEY=$(ask  "PGP signing key id (empty = none)" "")
 
 	# A passphrase file only makes sense when a signing key was given.
@@ -123,6 +129,7 @@ if [ "$DO_CONF" = 1 ]; then
 	case "$FIREWALL" in
 	ipfw) FW_SYSLOG_RE="ipfw" ;;
 	pf)   FW_SYSLOG_RE="pf: " ;;
+	ufw)  FW_SYSLOG_RE="\[UFW " ;;
 	*)    FW_SYSLOG_RE="ipfw|pf: " ;;
 	esac
 
@@ -157,6 +164,7 @@ AUTH_FILE="$AUTH_FILE"
 FIREWALL="$FIREWALL"
 PFLOG_FILE="/var/log/pflog"
 IPFW_LOG_FILE="/var/log/security"
+UFW_LOG_FILE="/var/log/ufw.log"
 FW_SYSLOG_RE="$FW_SYSLOG_RE"
 CONFEOF
 	echo "Wrote $CONF"

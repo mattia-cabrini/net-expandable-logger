@@ -26,13 +26,14 @@ SIGN_KEY=""
 SIGN_PASSFILE=""
 
 # --- log sources ------------------------------------------------------------
-MESSAGES_FILE="/var/log/messages"        # FreeBSD system log
+MESSAGES_FILE="/var/log/messages"        # system log (Ubuntu: /var/log/syslog)
 AUTH_FILE="/var/log/auth.log"            # sshd auth events
 
-# --- firewall (pf | ipfw | none) --------------------------------------------
+# --- firewall (pf | ipfw | ufw | none) --------------------------------------
 FIREWALL="pf"
 PFLOG_FILE="/var/log/pflog"              # pf: binary pcap, read with tcpdump
 IPFW_LOG_FILE="/var/log/security"        # ipfw: text log
+UFW_LOG_FILE="/var/log/ufw.log"          # ufw: text log ([UFW ...] kernel lines)
 # ERE matching firewall lines to strip from syslog_no_fw and, as a fallback,
 # to pick firewall events out of the system log.
 FW_SYSLOG_RE="ipfw|pf: "

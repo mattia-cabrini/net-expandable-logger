@@ -3,7 +3,8 @@
 Copyright (c) 2026 Mattia Cabrini
 SPDX-License-Identifier: MIT
 
-A small, generic, self-configuring status logger for FreeBSD. It runs a set of
+A small, generic, self-configuring status logger for FreeBSD and Ubuntu
+Linux. It runs a set of
 collectors, assembles their output into a single `.noeml` message, and drops it
 into a deposit directory.
 
@@ -42,9 +43,12 @@ sudo make uninstall   # removes files and the cron entry; keeps the spool
 
 ## Requirements
 
-- FreeBSD with a POSIX `/bin/sh`.
+- FreeBSD or Ubuntu Linux with a POSIX `/bin/sh` (dash is fine).
+- Classic text system logs with traditional `"Jul 18 ..."` timestamps: the 48h
+  filters key on them. On journald-only hosts install `rsyslog`.
 - [`cmc-eml`](https://github.com/mattia-cabrini/cmc-eml) in `PATH` (builds the MIME message).
 - `tcpdump` if you use pf and want firewall events from `pflog`.
+- `ufw` if you select the ufw firewall (Linux); its log at `UFW_LOG_FILE`.
 - `gpg` only if you configure a signing key.
 
 ## What it collects
@@ -56,9 +60,10 @@ script there:
 - **syslog** — the whole system log of the last 48h, attached.
 - **syslog_no_fw** — the same log with firewall lines removed, attached.
 - **fw_log** — firewall events of the last 48h, attached (pf via `pflog`,
-  ipfw via `/var/log/security`).
+  ipfw via `/var/log/security`, ufw via `/var/log/ufw.log`).
 - **fw_status** — the firewall state as-is, in the body only (pf: info, NAT and
-  numbered ruleset; ipfw: numbered ruleset with counters).
+  numbered ruleset; ipfw: numbered ruleset with counters; ufw: verbose status
+  and numbered rules).
 - **access** — SSH logins and failures of the last 48h, attached.
 
 ## How it works

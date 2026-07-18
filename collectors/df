@@ -5,9 +5,11 @@
 # df collector -- filesystem usage, shown in the e-mail BODY only (no attachment).
 TAG=df
 
-# Real filesystems only: drop the virtual ones (devfs, tmpfs, ...). If that
-# leaves nothing (unusual), fall back to the full df output.
-out=$(df -h 2>/dev/null | grep -v -e devfs -e tmpfs -e fdescfs -e procfs 2>/dev/null)
+# Real filesystems only: drop the virtual ones (devfs, fdescfs, procfs on
+# FreeBSD; udev, overlay, efivarfs and squashfs snap loop mounts on Linux).
+# If that leaves nothing (unusual), fall back to the full df output.
+out=$(df -h 2>/dev/null | grep -v -e devfs -e tmpfs -e fdescfs -e procfs \
+    -e udev -e /dev/loop -e overlay -e efivarfs 2>/dev/null)
 [ -n "$out" ] || out=$(df -h 2>/dev/null)
 
 # Body fragment: a heading and the table, HTML-escaped inside <pre>.
